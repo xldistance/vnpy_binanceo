@@ -49,7 +49,7 @@ from vnpy.trader.utility import (
     extract_vt_symbol,
     get_local_datetime,
     is_target_contract,
-    remain_alpha,
+    get_symbol_mark,
     error_monitor
 )
 
@@ -212,7 +212,7 @@ class BinanceoGateway(BaseGateway):
             symbol=symbol,
             exchange=Exchange(exchange),
             interval=Interval.MINUTE,
-            start=datetime.now(TZ_INFO) - timedelta(minutes=1440 * 5),
+            start=datetime.now(TZ_INFO) - timedelta(minutes=100),
             end=datetime.now(TZ_INFO),
             #start=datetime(2026,4,15,tzinfo=TZ_INFO),
             #end=datetime(2026,5,27,tzinfo=TZ_INFO),
@@ -685,7 +685,12 @@ class BinanceoRestApi(RestClient):
         """
         收到发送委托单失败回报
         """
+        error_data = request.response.json()
         order = request.extra
+        # -6045 只减仓委托单发送失败，存在活动委托单
+        if str(error_data["code"]) == "-6045":
+            order.reject_code = "-6045"
+
         order.status = Status.REJECTED
         self.gateway.on_order(order)
 
@@ -982,7 +987,7 @@ class BinanceoDataWebsocketApi:
         if not tick:
             tick = TickData(
                 symbol=req.symbol,
-                name=remain_alpha(req.symbol),
+                name=get_symbol_mark(req.vt_symbol),
                 exchange=Exchange.BINANCEO,
                 datetime=datetime.now(TZ_INFO),
                 gateway_name=self.gateway_name,
@@ -1010,6 +1015,7 @@ class BinanceoDataWebsocketApi:
         收到深度数据推送
         """
         tick = self.ticks[symbol]
+        tick.datetime = get_local_datetime(data["T"])
         bids = data["b"]
         asks = data["a"]
         # 提取前5个最佳买入价格和量，并为tick对象设置属性
@@ -1037,10 +1043,9 @@ class BinanceoDataWebsocketApi:
         """
         symbol = data["s"]
         tick = self.ticks[symbol]
-        tick.datetime = get_local_datetime(int(data["E"]))
+        tick.datetime = get_local_datetime(int(data["T"]))
         tick.bid_price_1, tick.bid_volume_1 = float(data["b"]), float(data["B"])
         tick.ask_price_1, tick.ask_volume_1 = float(data["a"]), float(data["A"])
-        self.gateway.on_tick(copy(tick))
     # -------------------------------------------------------------------------------------------------------
     def on_book_trade(self, data: dict) -> None:
         """
@@ -1050,7 +1055,8 @@ class BinanceoDataWebsocketApi:
         tick = self.ticks[symbol]
         tick.datetime = get_local_datetime(int(data["T"]))
         tick.last_price = float(data["p"])
-        
+        self.gateway.on_tick(copy(tick))
+
 class BinanceoDataWebsocketBase(WebsocketClient):
     """Binance 公共行情 websocket 基类。"""
 
@@ -1205,5 +1211,3 @@ class BinanceoMarketWebsocketApi(BinanceoDataWebsocketBase):
             self.api.on_tick(data)
         elif channel == "optionTrade":
             self.api.on_book_trade(data)
-
-
