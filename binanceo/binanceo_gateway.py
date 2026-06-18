@@ -508,14 +508,15 @@ class BinanceoRestApi(RestClient):
             account = AccountData(
                 accountid=asset["asset"] + "_" + self.gateway_name,
                 balance=float(asset["equity"]),
-                frozen=float(asset["equity"]) - float(asset["available"]),
+                frozen=float(asset["initialMargin"]),   # 冻结资金
+                margin = float(asset["maintMargin"]),
                 position_profit=float(asset["unrealizedPNL"]),
                 available=float(asset["available"]),
                 datetime=get_local_datetime(data["time"]),
                 file_name=self.gateway.account_file_name,
                 gateway_name=self.gateway_name,
             )
-            account.margin = account.balance - account.available
+            account.percent = account.margin / float(asset["adjustedEquity"]) * 100
             if account.balance:
                 self.gateway.on_account(account)
                 self.accounts_info[account.accountid] = account.__dict__
@@ -856,14 +857,15 @@ class BinanceoTradeWebsocketApi(WebsocketClient):
         account = AccountData(
             accountid="USDT_" + self.gateway_name,
             balance=float(packet["eq"]),
-            frozen=float(packet["eq"]) - float(packet["b"]),
-            margin=float(packet["m"]),
+            frozen=float(packet["i"]),
+            margin=float(packet["M"]),
             position_profit=float(packet["u"]),
-            available=float(packet["b"]),
+            available=float(packet["b"]) - float(packet["i"]),
             datetime=get_local_datetime(packet["E"]),
             file_name=self.gateway.account_file_name,
             gateway_name=self.gateway_name,
         )
+        account.percent = account.margin / float(packet["aeq"]) * 100
         self.gateway.on_account(account)
 
     # -------------------------------------------------------------------------------------------------------
@@ -1152,7 +1154,7 @@ class BinanceoPublicWebsocketApi(BinanceoDataWebsocketBase):
     def get_subscribe_params(self, req: SubscribeRequest) -> List[str]:
         return [
             req.symbol.lower() + "@depth5@100ms",
-            # symbol_lower + "@bookTicker",  # 逐笔一档深度(订阅该主题ws行情会不断断开重连，暂不使用)
+            # symbol_lower + "@bookTicker",  # 逐笔一档深度
         ]
     # -------------------------------------------------------------------------------------------------------
     def on_packet(self, packet: dict) -> None:
